@@ -21,26 +21,53 @@ DEVICE_CONFIGS: Dict[str, Dict] = {
 }
 
 
-async def execute_commands(
+async def execute_extron_commands(
     session: asyncssh.SSHClientConnection, commands: List[str]
 ) -> None:
-    #
-    for command in commands:
-        print(f"Executing command: {command}")
-        try:
-            result = await session.run(command, check=True, timeout=10)
 
-            print(f"Output for command '{command}':")
-            print(result.stdout)
-            if result.stderr:
-                print(f"Error (stderr) for command '{command}':")
-                print(result.stderr)
-        except asyncssh.ProcessError as exc:
-            print(f"Error executing command '{command}': {exc}")
-        except asyncio.TimeoutError:
-            print(f"Command '{command}' timed out.")
-        except Exception as exc:
-            print(f"Unexpected error occurred while executing '{command}': {exc}")
+    # Create an interactive session
+    process, chan = await session.create_session(
+        asyncssh.SSHClientProcess, term_type="vt100"
+    )
+
+    # Execute each command
+    for command in commands:
+        print(f"Executing extron command: {command}")
+        chan.stdin.write(command + "\r")
+
+        # Wait for response and write to output
+        await asyncio.sleep(0.5)
+        output = await chan.stdout.read(1024)
+        # Split the output into lines and skip the echoed command
+        lines = output.split("\n")
+        output = "\n".join(lines[1:])
+        print(f"Extron response: {output.strip()}")
+
+
+async def execute_commands(
+    session: asyncssh.SSHClientConnection, commands: List[str], device_type: str
+) -> None:
+
+    # If the device is extron call execute extron commands from an interactie session.
+    if device_type == "extron":
+        await execute_extron_commands(session, commands)
+    else:  # For all other device types, execute each command with session.run().
+        for command in commands:
+            print(f"Executing command: {command}")
+            try:  # Execute command, wait for response, then print response.
+                result = await session.run(command, check=True, timeout=10)
+                print(f"Output for command '{command}':")
+                print(result.stdout)
+                if result.stderr:
+                    print(f"Error (stderr) for command '{command}':")
+                    print(result.stderr)
+
+            except asyncssh.ProcessError as exc:
+                print(f"Error executing command '{command}': {exc}")
+            except asyncio.TimeoutError:
+                print(f"Command '{command}' timed out.")
+            except Exception as exc:
+                print(f"Error executing command '{command}': {exc}")
 
 
 async def run_client(
@@ -71,7 +98,7 @@ async def run_client(
         # Connect and execute commands
         async with asyncssh.connect(**connect_args) as conn:
             print(f"Connected to {host} - {device_type}")
-            await execute_commands(conn, config.get("commands", []))
+            await execute_commands(conn, config.get("commands", []), device_type)
 
     except (OSError, asyncssh.Error) as exc:
         print(f"[{host}] SSH connection failed: {exc}")
