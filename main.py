@@ -1,5 +1,5 @@
 import asyncio, asyncssh, sys, getpass
-from typing import List, Tuple, Dict
+from typing import List, Dict
 
 DEVICE_CONFIGS: Dict[str, Dict] = {
     "amx": {
@@ -17,13 +17,14 @@ DEVICE_CONFIGS: Dict[str, Dict] = {
         ],
         "commands": ["help"],
     },
-    "extron": {"username": "admin", "port": 22023, "commands": ["Help"]},
+    "extron": {"username": "admin", "port": 22023, "commands": ["A"]},
 }
 
 
 async def execute_commands(
     session: asyncssh.SSHClientConnection, commands: List[str]
 ) -> None:
+    #
     for command in commands:
         print(f"Executing command: {command}")
         try:
@@ -43,7 +44,8 @@ async def execute_commands(
 
 
 async def run_client(
-    host: str, device_type: str, password_map: Dict[str, str]
+    host: str,
+    device_type: str,
 ) -> asyncssh.SSHCompletedProcess:
 
     try:
@@ -51,13 +53,12 @@ async def run_client(
         config = DEVICE_CONFIGS.get(device_type)
         if not config:
             raise ValueError(f"Unsupported device type: {device_type}")
-        password = password_map.get(device_type)
 
         # Defines arguments for connections
         connect_args = {
             "host": host,
             "username": config["username"],
-            "password": password,
+            "password": config["password"],
             "known_hosts": None,
         }
         if "port" in config:
@@ -67,7 +68,7 @@ async def run_client(
         if "kex_algs" in config:
             connect_args["kex_algs"] = config["kex_algs"]
 
-        # Connect
+        # Connect and execute commands
         async with asyncssh.connect(**connect_args) as conn:
             print(f"Connected to {host} - {device_type}")
             await execute_commands(conn, config.get("commands", []))
@@ -77,16 +78,20 @@ async def run_client(
 
 
 # runs multiple SSH clients at once. Takes a List of individual devices represented with Tuples. The Tuple stores the host IP and device_type
-async def run_multiple_clients(devices: List[Tuple[str, str]]) -> None:
+async def run_multiple_clients(devices: Dict[str, List[str]]) -> None:
+    # Prompt password for each device type
+    for device_type in devices:
+        password = getpass.getpass(f"Enter the password for '{device_type}': ")
+        if device_type in DEVICE_CONFIGS:
+            DEVICE_CONFIGS[device_type]["password"] = password
+        else:
+            print(f"Warning: Unknown device type '{device_type}'")
 
-    # stores passwords securly obtained with getpass from user input
-    password_map = {}
-    for item in devices.items():
-        item.add({"password": getpass.getpass(f"Enter the password for devices: ")})
-
-    # call run_client for each device
+    # Loop through each IP (hosts) for each device type
     tasks = [
-        run_client(host, device_type, password_map) for host, device_type in devices
+        run_client(host, device_type)
+        for (device_type, hosts) in devices.items()
+        for host in hosts
     ]
 
     await asyncio.gather(*tasks)
@@ -94,10 +99,12 @@ async def run_multiple_clients(devices: List[Tuple[str, str]]) -> None:
 
 # Declare the host IP and device kind for each device
 devices = {
-    "nsb-208-touchpad-1.av.ilstu.edu": {"kind": "amx"},
-    "192.168.0.1": {
-        "kind": "extron",
-    },
+    "amx": [
+        "nsb-208-touchpad-1.av.ilstu.edu",
+    ],
+    "extron": [
+        "192.168.0.1",
+    ],
 }
 try:
     asyncio.run(run_multiple_clients(devices))
